@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -49,12 +51,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	data, err := io.ReadAll(file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error reading file", err)
-		return
-	}
-
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't find the video", err)
@@ -66,12 +62,36 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// converted image data to base64 string
-	base64Encoded := base64.StdEncoding.EncodeToString(data)
-	base64DataURL := fmt.Sprintf("data:%s;base64,%w", mediaType, base64Encoded)
+	// constructiong path
+	file_extention, err := mime.ExtensionsByType(mediaType)
+	if err != nil || len(file_extention) == 0 {
+		respondWithError(w, http.StatusInternalServerError, "Error while reading extention from header",err)
+		return
+	}
+	
+	finalFilename := videoIDString + file_extention[0]
 
+	// create a new file on disct
+	dst, err := os.Create(filepath.Join("assets", finalFilename))
+
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error creating a new file", err)
+		return
+	}
+	defer dst.Close()
+
+	// copy the file contents
+	_, err = io.Copy(dst, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error copying file contents", err)
+		return
+	}
+
+	// construct public URL
+	urlPath := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, finalFilename)
+	
 	// update thumbnail in database
-	video.ThumbnailURL = &base64DataURL
+	video.ThumbnailURL = &urlPath
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update the video", err)
