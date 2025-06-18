@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -45,12 +47,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	mediaType := header.Header.Get("Content-Type")
-	if mediaType == "" {
-		respondWithError(w, http.StatusBadRequest, "Missing Content-Type for thumbnail", nil)
-		return
-	}
-
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't find the video", err)
@@ -62,14 +58,29 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	mediaType, _, err := mime.ParseMediaType(header.Header.Get("Content-Type"))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid Content-Type", err)
+		return
+	}
+	if mediaType != "image/jpeg" && mediaType != "image/png" {
+		respondWithError(w, http.StatusBadRequest, "Invalid file type", nil)
+		return
+	}
+
 	// constructiong path
 	file_extention, err := mime.ExtensionsByType(mediaType)
 	if err != nil || len(file_extention) == 0 {
 		respondWithError(w, http.StatusInternalServerError, "Error while reading extention from header",err)
 		return
 	}
+
+	key := make([]byte, 32)
+	rand.Read(key)
+
+	base64_key := base64.RawURLEncoding.EncodeToString(key)
 	
-	finalFilename := videoIDString + file_extention[0]
+	finalFilename :=  base64_key + file_extention[0]
 
 	// create a new file on disct
 	dst, err := os.Create(filepath.Join("assets", finalFilename))
@@ -89,7 +100,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	// construct public URL
 	urlPath := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, finalFilename)
-	
 	// update thumbnail in database
 	video.ThumbnailURL = &urlPath
 	err = cfg.db.UpdateVideo(video)
