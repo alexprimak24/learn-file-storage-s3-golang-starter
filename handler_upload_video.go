@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -16,7 +17,9 @@ import (
 )
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
-	const maxMemory = 1 << 30 // limit to 1GB
+	const uploadLimit = 1 << 30 // limit to 1GB
+
+	r.Body = http.MaxBytesReader(w, r.Body, uploadLimit)
 	
 	// get video ID and parse it
 	videoIDString := r.PathValue("videoID")
@@ -96,6 +99,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	dir_name, err := determineDirectory(tmpFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error determining aspect ration", err)
+		return
+	}
+
 	// put obj to S3
 	key := make([]byte, 32)
 	rand.Read(key)
@@ -109,6 +118,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	}
 
 	finalFilename :=  base64_key + file_extention[0]
+	finalFilename = filepath.Join(dir_name, finalFilename)
 
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket: aws.String(cfg.s3Bucket),
@@ -129,3 +139,4 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	respondWithJSON(w, http.StatusOK, video)
 }
+
